@@ -25,7 +25,7 @@
 | # | Constraint |
 | --- | --- |
 | C1 | Decode 是 **auto-regressive** 的：每个 iteration 每条 sequence 只能生成一个 token，无法 parallelize 单条 request 内的 token generation。 |
-| C2 | TTFT 要尽量低，因为人都是不耐心的。 |
+| C2 | TTFT (Prefill) 要尽量低，因为人都是不耐心的。 |
 | C3 | Batch decode requests 能提高 throughput，但 batch 太大会导致 per-request latency 升高（compute 被 share）。需要找到合适的 batch size。 |
 | C4 | 每条 batched request 需要独立的 KV Cache，必须 manage 每条 request 的 allocation/deallocation。 |
 

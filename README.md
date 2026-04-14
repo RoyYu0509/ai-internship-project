@@ -16,7 +16,7 @@ ai-internship-project/
 ├── README.md              ← 项目门面（Step 8 填内容）
 ├── LICENSE                ← 开源协议（Step 8 选一个）
 ├── .gitignore             ← Git 忽略规则（Step 6 一起写）
-├── src/                   ← 源代码（topic 确定后再组织子目录）
+├── inferenceLM/           ← 源代码（topic 确定后再组织子目录）
 ├── tests/                 ← 测试代码
 ├── docs/
 │   ├── templates/         ← 模板存放处（Design Doc, ADR, Task Spec 等）

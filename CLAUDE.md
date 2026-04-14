@@ -4,7 +4,7 @@
 An LLM Serving System that is able to serving multiple users requests at the same time. The system should be able to handle multiple requests at the same time, and should be able to scale up or down as needed.
 
 ## Repository Structure
-- `src/` — Source code
+- `inferenceLM/` — Source code
 - `tests/` — Test code
 - `docs/templates/` — Reusable templates (design doc, ADR, task spec)
 - `docs/decisions/` — Architecture Decision Records (ADR-001, ADR-002...)
@@ -38,7 +38,7 @@ An LLM Serving System that is able to serving multiple users requests at the sam
 
 
 ## Forbidden
-- Do not modify files outside src/ and tests/ without explicit discussion.
+- Do not modify files outside inferenceLM/ and tests/ without explicit discussion.
 - Do not install new dependencies without documenting rationale.
 - Do not auto-generate large amounts of boilerplate — prefer understanding over speed.
 

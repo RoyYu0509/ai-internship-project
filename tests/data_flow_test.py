@@ -6,7 +6,7 @@ import asyncio
 import pytest
 import asyncio
 import pytest
-from inferenceLM.request_receiver.request_reciever import RequestReceiver
+from inferenceLM.request_receiver.request_receiver import RequestReceiver
 
 @pytest.mark.asyncio
 async def test_multiple_user_data_flow():

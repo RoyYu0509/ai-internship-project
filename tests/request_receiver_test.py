@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from inferenceLM.request_receiver.request_reciever import RequestReceiver
+from inferenceLM.request_receiver.request_receiver import RequestReceiver
 
 pending_queue = asyncio.Queue()
 request_store = {}

@@ -1,5 +1,7 @@
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
 from inferenceLM.data.request_status import RequestStatus
-from inferenceLM.engine.lm_engine import LMEngine
+from inferenceLM.engine.inference_engine import InferenceEngine
 from inferenceLM.data.request import RequestData
 from inferenceLM.data.tokenized_data import TokenizedData
 import asyncio
@@ -8,14 +10,18 @@ import asyncio
 import pytest
 from inferenceLM.request_receiver.request_receiver import RequestReceiver
 
-@pytest.mark.asyncio
-async def test_multiple_user_data_flow():
-    pending_queue = asyncio.Queue()
-    waiting_queue = []
-    request_store = {}
+@pytest.fixture(scope="module")
+def model():
+    return GPT2LMHeadModel.from_pretrained("gpt2")
 
+
+@pytest.mark.asyncio
+async def test_multiple_user_data_flow(model: GPT2LMHeadModel):
+    pending_queue = asyncio.Queue()
+    request_store = {}
+    waiting_queue = []
     receiver = RequestReceiver("gpt2", pending_queue, request_store)
-    lm_engine = LMEngine(pending_queue, waiting_queue, request_store)
+    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
 
     # 3 Users submit requests concurrently for 3 times
     inputs = []
@@ -26,9 +32,9 @@ async def test_multiple_user_data_flow():
         coros = [receiver.submit_request(user_input[j]["prompt_text"], user_input[j]["user_id"]) for j in range(3)]
         request_ids.extend(await asyncio.gather(*coros))
 
-    # Start the LM Engine to fetching requests and put them in waiting_queue
-    lm_engine.open = True
-    await lm_engine.run() # 在 background register task
+    # Start the Inference Engine to fetching requests and put them in waiting_queue
+    inference_engine.open = True
+    await inference_engine.run() # 在 background register task
     await pending_queue.join()
 
     assert len(waiting_queue) == 9, "All tokenized requests should be moved to waiting queue"
@@ -45,13 +51,13 @@ async def test_multiple_user_data_flow():
 
 
 @pytest.mark.asyncio
-async def test_data_flow():
+async def test_data_flow(model: GPT2LMHeadModel):
     pending_queue = asyncio.Queue()
     waiting_queue = []
     request_store = {}
 
     receiver = RequestReceiver("gpt2", pending_queue, request_store)
-    lm_engine = LMEngine(pending_queue, waiting_queue, request_store)
+    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
 
     # Submit requests
     ids = []
@@ -68,9 +74,9 @@ async def test_data_flow():
         assert request_store[request_id].user_id == f"user_{i}", f"User ID for Request ID {request_id} should match"
         assert request_store[request_id].status == RequestStatus.PENDING, f"Status for Request ID {request_id} should be PENDING"
 
-    # Start the LM Engine to fetching requests and put them in waiting_queue
-    lm_engine.open = True
-    await lm_engine.run()
+    # Start the Inference Engine to fetching requests and put them in waiting_queue
+    inference_engine.open = True
+    await inference_engine.run()
     await pending_queue.join()  # Wait until all requests in pending_queue are processed
     assert len(waiting_queue) == 10, "All tokenized requests should be moved to waiting queue"
     

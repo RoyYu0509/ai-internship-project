@@ -21,7 +21,7 @@ No batching yet, no KV cache optimization yet. One request in, tokens out.
 
 
 
-### Task 3: 把 LM Engine 中的 inference 变成 async coro, 并接入现有的 Inference Engine
+### Task 3: 把 LM Engine 中的 inference 变成 async coro, 修改 Inference Engine 来适配 async 的 inference
 - **What:** 把 LMEngine.inference() method 改成 async function, 并接入现有的 Inference Engine skeleton
 - **Why:** 跑通 Inference 的 data flow.
 - **Accepting Criteria:** Inference Engine 启动后, 多个User同时发送requests, InferenceEngine 可以在 async 的情况下, 同时跑 RequestReceiver.fetch() 和 LMEngine.inference(), 并且生成的 token sequence 与预期一致。
@@ -58,6 +58,7 @@ No batching yet, no KV cache optimization yet. One request in, tokens out.
 ### Task 4: End-to-end test for Inference Engine
 - **What:** 写一个 end-to-end 的测试, 多个 request 按顺序进入 inference engine, 能让 LM Engine 生成这些 request 的 token sequence.
 - **Why:** 验证整个 inference pipeline 是通的, 包括 request intake, inference loop.
-- **Accepting Criteria:** 模拟 3 个用户, 每个用户提交
--  2 个 request, 共 6 个 request. 启动 engine 后, 6 个 request 按照顺序一个一个进入 Inference Engine, 都能正确地得到生成的 token sequence 作为输出, 并且输出的 token sequence 与预期一致。
+- **Accepting Criteria:** 
+- 1. 模拟 3 个用户, 每个用户提交 3 个 request, 共 9 个 request. 启动 engine 后, 9 个 request 按照顺序一个一个进入 Inference Engine, 都能正确地得到生成的 token sequence 作为输出, 并且输出的 token sequence 与预期一致。
+- 2. engine 先 run()，然后边 submit 边 inference（producer-consumer concurrent）模拟整个 system 在 concurrent 的情况下的表现。
 - **Estimated Effort:** 4 hr    

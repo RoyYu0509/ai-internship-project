@@ -9,10 +9,10 @@ from typing import Dict
 class RequestReceiver:
     """
     This class is responsible for: 
-        接收 request -> tokenization -> 放到 waiting queue 里等 Inference Engine 来拿
+        接收 request -> tokenization -> 放到 pending queue 里等 Inference Engine 来拿
     
     Attributes:
-        pending_queue (asyncio.Queue): Reference to a shared waiting queue with Inference Engine
+        pending_queue (asyncio.Queue): Reference to a shared pending queue with Inference Engine
         request_store (dict): A dictionary to store the original RequestData objects, keyed by request_id.
         tokenizer (Tokenizer): An instance of the Tokenizer class for tokenizing input text.
     """
@@ -28,7 +28,7 @@ class RequestReceiver:
 
     async def submit_request(self, prompt_text: str, user_id: str, max_length: int = 20, do_sample: bool = False) -> str:
         """
-        Create a new RequestData & Submit a new request to the waiting queue. (可以 wait for queue has space)
+        Create a new RequestData & Submit a new request to the pending queue. (可以 wait for queue has space)
 
         Args:
             prompt_text (str): The raw text prompt from the user.
@@ -61,9 +61,9 @@ class RequestReceiver:
 
     async def get_from_request_queue(self) -> TokenizedData:
         """
-        Get the next tokenized data from the waiting queue. (不需要 wait, 因为 Inference Engine 是在等 queue 里有东西了才来拿的)
+        Get the next tokenized data from the pending queue. (不需要 wait, 因为 Inference Engine 是在等 queue 里有东西了才来拿的)
         
         Returns:
-            TokenizedData: The next tokenized data from the waiting queue.
+            TokenizedData: The next tokenized data from the pending queue.
         """
         return await self.pending_queue.get()

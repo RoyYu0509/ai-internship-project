@@ -16,12 +16,11 @@ def model():
 
 
 @pytest.mark.asyncio
-async def test_multiple_user_data_flow(model: GPT2LMHeadModel):
+async def test_concurrent_multiple_user_data_flow(model: GPT2LMHeadModel):
     pending_queue = asyncio.Queue()
     request_store = {}
-    waiting_queue = []
     receiver = RequestReceiver("gpt2", pending_queue, request_store)
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
+    inference_engine = InferenceEngine(model, pending_queue, request_store)
 
     # 3 Users submit requests concurrently for 3 times
     inputs = []
@@ -33,56 +32,56 @@ async def test_multiple_user_data_flow(model: GPT2LMHeadModel):
         request_ids.extend(await asyncio.gather(*coros))
 
     # Start the Inference Engine to fetching requests and put them in waiting_queue
-    inference_engine.open = True
-    await inference_engine.run() # 在 background register task
+    task = inference_engine.run() # 在 background register task
     await pending_queue.join()
+    task.cancel() # 取消 background task, 已经全部处理完了
 
-    assert len(waiting_queue) == 9, "All tokenized requests should be moved to waiting queue"
-
-    # Check if waiting_queue contents are correct and in order
+    # 1. 所有 request 都在 request_store 里
     for i in range(9):
-        tokenized_data = waiting_queue[i]
-        expected_prompt = f"Prompt {i//3}"
-        expected_user_id = f"user_{i%3}"
-        assert tokenized_data.tokens == receiver.tokenizer.encode(expected_prompt), f"Expected tokens for '{expected_prompt}', got {tokenized_data.tokens}"
-        assert tokenized_data.request_id == request_ids[i], f"Expected request ID {request_ids[i]}, got {tokenized_data.request_id}"
-        assert request_store[tokenized_data.request_id].user_id == expected_user_id, f"Expected user ID {expected_user_id}, got {request_store[tokenized_data.request_id].user_id}"
-        assert request_store[tokenized_data.request_id].status == RequestStatus.WAITING, f"Expected status WAITING, got {request_store[tokenized_data.request_id].status}"
+        assert request_ids[i] in request_store, f"Request ID {request_ids[i]} should be in request_store"
+
+    # 2. 所有 9 个 request status == DONE
+    for i in range(9):
+        assert request_store[request_ids[i]].status == RequestStatus.DONE, f"Request ID {request_ids[i]} should be marked as DONE"  
+        
+    # 3. 所有 9 个 request 都有 generated tokens
+    for i in range(9):
+        assert len(request_store[request_ids[i]].generated_tokens) > 0, f"Request ID {request_ids[i]} should have generated tokens"
+
+    # 4. 每个 request 的 user_id 和 prompt_text 与提交时一致
+    for req_id, input in zip(request_ids, inputs):
+        assert request_store[req_id].user_id == input["user_id"], f"User ID for Request ID {req_id} should match"
+        assert request_store[req_id].prompt_text == input["prompt_text"], f"Prompt text for Request ID {req_id} should match"
 
 
 @pytest.mark.asyncio
-async def test_data_flow(model: GPT2LMHeadModel):
+async def test_inference_running_while_input_new_requests(model: GPT2LMHeadModel):
     pending_queue = asyncio.Queue()
-    waiting_queue = []
     request_store = {}
-
     receiver = RequestReceiver("gpt2", pending_queue, request_store)
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
+    inference_engine = InferenceEngine(model, pending_queue, request_store)
 
-    # Submit requests
-    ids = []
-    incoming_requests = [{"prompt_text": f"Prompt {i}", "user_id": f"user_{i}"} for i in range(10)]
-    for user_input in incoming_requests:
-        id = await receiver.submit_request(user_input["prompt_text"], user_input["user_id"])
-        ids.append(id)
+    # 开启 inference engine
+    task = inference_engine.run() # 在 background register task
 
-    # Check requests are stored in request_store
-    for i in range(10):
-        request_id = ids[i]
-        assert request_id in request_store, f"Request ID {request_id} should be in request_store"
-        assert request_store[request_id].prompt_text == f"Prompt {i}", f"Prompt text for Request ID {request_id} should match"
-        assert request_store[request_id].user_id == f"user_{i}", f"User ID for Request ID {request_id} should match"
-        assert request_store[request_id].status == RequestStatus.PENDING, f"Status for Request ID {request_id} should be PENDING"
+    request_ids = []
 
-    # Start the Inference Engine to fetching requests and put them in waiting_queue
-    inference_engine.open = True
-    await inference_engine.run()
-    await pending_queue.join()  # Wait until all requests in pending_queue are processed
-    assert len(waiting_queue) == 10, "All tokenized requests should be moved to waiting queue"
-    
-    # Check the tokenized data inside the waiting_queue matches the original requests
-    for i in range(10):
-        tokenized_data = waiting_queue[i]
-        assert tokenized_data.request_id == ids[i], f"Request ID in waiting_queue should match"
-        expected_tokens = receiver.tokenizer.encode(f"Prompt {i}")
-        assert tokenized_data.tokens == expected_tokens, f"Tokens for Request ID {tokenized_data.request_id} in waiting_queue should match tokenizer output"
+    # receiver 开始接收新 request
+    for i in range(3):
+        user_input = f"Prompt {i}"
+        request_id = await receiver.submit_request(user_input, f"user_{i}")
+        request_ids.append(request_id)
+        await asyncio.sleep(0.5) # 等半秒再提交下一个 request, 模拟用户输入的间隔
+
+    # 等待所有 request 都 inference engine 拿走, 然后处理完
+    await pending_queue.join() 
+    task.cancel() # 取消 background task, 已经全部处理完了
+
+    # check 所有 request 都被处理了
+    for i in range(3):
+        req_id = request_ids[i] # 不能用 str(i) 因为 request_id 是 static method 生成的, 不是简单的数字字符串
+        assert req_id in request_store, f"Request ID {req_id} should be in request_store"
+        assert request_store[req_id].status == RequestStatus.DONE, f"Request ID {req_id} should be marked as DONE"  
+        assert len(request_store[req_id].generated_tokens) > 0, f"Request ID {req_id} should have generated tokens"
+        assert request_store[req_id].prompt_text == f"Prompt {i}", f"Prompt text for Request ID {req_id} should match"
+        assert request_store[req_id].user_id == f"user_{i}", f"User ID for Request ID {req_id} should match"    

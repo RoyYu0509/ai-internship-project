@@ -78,7 +78,7 @@ class LMEngine:
         prompt_length + generated_length <= max_length
 
         Args:
-            tokenized_data (TokenizedData): The tokenized data for the request, containing input
+            tokenized_data (TokenizedData): The tokenized data for the request, containing input tokens
             do_sample (bool): Whether to use sampling strategy
             max_length (int): The maximum length of the generated sequence
 

@@ -27,7 +27,7 @@ new_kv = outputs.past_key_values  # 传给下一步用
 **问题:** 它不暴露中间状态（KV cache、per-step logits），导致你无法在 Week 3/4 实现 continuous batching 和 paged KV cache。这才是 rejection reason.
 **好处**: 代码量少、不需要手动管理 KV cache、不需要自己写 stopping logic、HuggingFace 已经帮你处理了 edge case.
 
-### Sync vs Async inference 
+### Inference 是 Sync 还是 Async 的?
 **✨ Final Decision**
 当前实现是 cooperative scheduling (Weak Async)：asyncio.sleep(0) 让出 event loop 给其他 task（比如 RequestReceiver 的 put）。不是真正的 async GPU execution——CPU 在 tensor.item() 时仍会 block 等 GPU。真正的 GPU/CPU 并行需要 CUDA stream 或 event-based sync，defer 到 Week 3/4。
 
@@ -35,7 +35,8 @@ new_kv = outputs.past_key_values  # 传给下一步用
 > 1. 设计成 sync function, 每次 fetch 一个 request, 跑完 inference loop, 再 fetch 下一个 request.
 **问题:** CPU 会有大量空转时间, 因为每次submit完之后, CPU 都要停下来, 等GPU完成computation之后, 再去干别的事情, 比如 fetch request, send response 等等.
 
-### Inference Engine 中 只保留一个 queue
+
+### Inference Engine 里需要几个 queue?
 **✨ Final Decision**
 Inference Engine 只保留一个 queue, pending queue. Request Receiver fetch request 的时候, 直接放到 pending queue 里. Inference Engine 从 pending queue 里拿 request 来跑 inference loop. 这样设计的好处是简单, 不需要在不同的 queue 之间同步 request 的状态.
 
@@ -73,6 +74,14 @@ Inference Engine 只保留一个 queue, pending queue. Request Receiver fetch re
 **好处:** 这个设计的好处是清晰, prefill 和 decode 的流程完全分开, 而且可以准确的更新 request 的 status -> PREFILLING / DECODING.
 **问题:** 不选这个是因为 week2 的主要任务是跑通 inference 的 end-to-end data flow. 我们会在 week3/4 的时候, 当需要 schedule 和 batching 的时候我们会重新实现.
 
+
+### InferenceEngine.run() 需要 return asyncio.Task 吗?
+**✨ Final Decision**
+InferenceEngine.run() return asyncio.Task(_keep_get_request_and_inference()). 这样create_task spawn task 然后立刻 return。
+
+**Alternatives:**
+> 1. InferenceEngine.run() 直接 await _keep_get_request_and_inference()，不 return task.
+**问题:** 如果这样设计的话, run() function 就一直不会 return, 因为 _keep_get_request_and_inference() 是一个 while True 的 loop, 只有当 engine 被 kill 的时候才会 break. 这样就导致我们在 await run() 的时候, Event loop 就被 run() 给占住了, 我们甚至无法 kill run() 内部的 _keep_get_request_and_inference 中的 while loop, 因为我们根本没有机会去调用 kill() function (必须在下一行).
 
 ## Consequences
 1. 现在的 Inference Engine 可以处理 单个 request 的 prefill -> decoding 的完整流程, KV Cache 用完就丢, 不需要存储.

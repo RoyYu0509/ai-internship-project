@@ -1,4 +1,4 @@
-from transformers import GPT2LMHeadModel
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
 from inferenceLM.data.request_status import RequestStatus
 from inferenceLM.engine.inference_engine import InferenceEngine
@@ -7,85 +7,120 @@ from inferenceLM.data.tokenized_data import TokenizedData
 import asyncio
 import pytest
 
+from unittest.mock import patch
+from unittest.mock import AsyncMock
+
+
 @pytest.fixture(scope="module")
 def model():
     return GPT2LMHeadModel.from_pretrained("gpt2")
 
-def test_inference_engine_is_default_shutdown(model: GPT2LMHeadModel):
+@pytest.mark.asyncio
+async def test_inference_engine_is_not_open(model: GPT2LMHeadModel):
     pending_queue = asyncio.Queue()
-    waiting_queue = []
     request_store = {}
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
-    assert not inference_engine.open, "Inference Engine should be closed by default"
+    inference_engine = InferenceEngine(model, pending_queue, request_store)
+
+    assert not inference_engine.open, "Inference Engine should be initialized as closed"
 
 @pytest.mark.asyncio
-async def test_inference_engine_cant_get_request_when_closed(model: GPT2LMHeadModel):
+async def test_inference_engine_async_fetch_all_requests(model: GPT2LMHeadModel):
     pending_queue = asyncio.Queue()
-    waiting_queue = []
     request_store = {}
 
-    await pending_queue.put("test_tokenized_data")
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
-    with pytest.raises(Exception, match='Inference Engine is not open. Please start the engine before getting requests.'):
-        await inference_engine.get_request()
-
-@pytest.mark.asyncio
-async def test_inference_engine_cant_run_when_closed(model: GPT2LMHeadModel):
-    pending_queue = asyncio.Queue()
-    waiting_queue = []
-    request_store = {}
-
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
-    with pytest.raises(Exception, match="Inference Engine is not open. Please start the engine before running it."):
-        await inference_engine.run()
-
-
-@pytest.mark.asyncio
-async def test_inference_engine_put_request_in_waiting_queue(model: GPT2LMHeadModel):
-    pending_queue = asyncio.Queue()
-    waiting_queue = []
-    request_store = {}
-    tokenized_requests = [TokenizedData(f"test_tokenized_data_{i}", [i]) for i in range(5)]
-
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
-    inference_engine.open = True
-
-    for tokenized_request in tokenized_requests:
-        await pending_queue.put(tokenized_request)
-        request_store[tokenized_request.request_id] = RequestData(
-            prompt_text="test_prompt",
-            user_id="test_user",
-            request_id=tokenized_request.request_id,
-            timestamp=0.0,
+    # create 10 tokenized requests and put them in the pending_queue
+    for i in range(10):
+        user_input = f"Prompt {i}"
+        input_ids = [i]  # dummy tokenized data, just use the index as the token for simplicity
+        request_id = f"request_{i}"
+        request_store[request_id] = RequestData(
+            request_id=request_id,
+            timestamp=i, 
+            user_id=f"user_{i}",
+            prompt_text=user_input,
+            status=RequestStatus.PENDING,
+            generated_tokens=[],
+            max_token_length=200,
         )
+        await pending_queue.put(TokenizedData(request_id=request_id, tokens=input_ids))
     
-    await inference_engine.run()
-    await pending_queue.join()
+    inference_engine = InferenceEngine(model, pending_queue, request_store)
 
-    assert len(waiting_queue) == len(tokenized_requests), "All tokenized requests should be moved to waiting queue"
-    for tokenized_request in waiting_queue:
-        assert tokenized_request in tokenized_requests, f"{tokenized_request} should be in the original tokenized requests"
+    # Check all requests are in the inference engine's request_store
+    for i in range(10):
+        assert f"request_{i}" in inference_engine.request_store, f"Request ID request_{i} should be in request_store"
+        assert inference_engine.request_store[f"request_{i}"].status == RequestStatus.PENDING, f"Request ID request_{i} should be in PENDING status"
+
+    # Start the Inference Engine to fetching requests and put them in waiting_queue
+    task = inference_engine.run() # 不要等 run(), 它是一个background task, 直接继续往下走到 sync point 再自然等这个task结束
+    await pending_queue.join()
+    task.cancel() 
     
+    # check all request is marked as DONE
+    for i in range(10):
+        assert inference_engine.request_store[f"request_{i}"].status == RequestStatus.DONE, f"Request ID request_{i} should be processed and marked as DONE"
+        assert len(inference_engine.request_store[f"request_{i}"].generated_tokens) > 0, f"Request ID request_{i} should have generated tokens"
+
+
+@pytest.fixture(scope="module")
+def tokenizer():
+    return GPT2Tokenizer.from_pretrained("gpt2")
 
 @pytest.mark.asyncio
-async def test_inference_engine_updates_request_status_to_waiting(model: GPT2LMHeadModel):
+async def test_inference_engine_reject_prompt_equals_max_len(model: GPT2LMHeadModel, tokenizer: GPT2Tokenizer):
     pending_queue = asyncio.Queue()
-    waiting_queue = []
     request_store = {}
-    tokenized_request = TokenizedData("test_tokenized_data", [0])
 
-    inference_engine = InferenceEngine(model, pending_queue, waiting_queue, request_store)
-    inference_engine.open = True
-
-    await pending_queue.put(tokenized_request)
-    request_store[tokenized_request.request_id] = RequestData(
-        prompt_text="test_prompt",
-        user_id="test_user",
-        request_id=tokenized_request.request_id,
-        timestamp=0.0,
+    user_input = "Hello, how are you? My name is Yifan and "
+    input_ids = tokenizer(user_input, return_tensors="pt").input_ids[:, :10] # truncate the input to max_length
+    request_id = "test_request"
+    request_store[request_id] = RequestData(
+        request_id=request_id,
+        timestamp=0, 
+        user_id="user_1",
+        prompt_text=user_input,
+        status=RequestStatus.PENDING,
+        generated_tokens=[],
+        max_token_length=1,
     )
-    
-    await inference_engine.run()
-    await pending_queue.join()
+    await pending_queue.put(TokenizedData(request_id=request_id, tokens=input_ids[0].tolist()))
 
-    assert request_store[tokenized_request.request_id].status == RequestStatus.WAITING, "Request status should be updated to WAITING"
+    inference_engine = InferenceEngine(model, pending_queue, request_store)
+    
+    task = inference_engine.run() 
+    await pending_queue.join()  # Wait until the request in pending_queue is processed
+    task.cancel()  # Cancel the background task after processing is done
+
+    assert inference_engine.request_store[request_id].status == RequestStatus.FAILED, f"Request ID {request_id} should be marked as FAILED due to prompt length equals max_length"
+    assert len(inference_engine.request_store[request_id].generated_tokens) == 0, f"Request ID {request_id} should not have generated tokens due to prompt length equals max_length"
+
+
+@pytest.mark.asyncio
+async def test_inference_engine_handle_lm_engine_exception(model: GPT2LMHeadModel, tokenizer: GPT2Tokenizer):
+    pending_queue = asyncio.Queue()
+    request_store = {}
+    inference_engine = InferenceEngine(model, pending_queue, request_store)
+    # Add a dummy request to the pending_queue
+    user_input = "Hello, how are you? My name is Yifan and "
+    input_ids = tokenizer(user_input, return_tensors="pt").input_ids
+    request_id = "test_request"
+    request_store[request_id] = RequestData(
+        request_id=request_id,
+        timestamp=0,
+        user_id="user_1",
+        prompt_text=user_input,
+        status=RequestStatus.PENDING,
+        generated_tokens=[],
+        max_token_length=200,
+    )
+    await pending_queue.put(TokenizedData(request_id=request_id, tokens=input_ids[0].tolist()))
+
+    runtime_error_inference = AsyncMock(side_effect=RuntimeError("Inference failed due to some error"))
+    # `patch` 需要完整的 import path
+    with patch(target = "inferenceLM.engine.inference_engine.LMEngine.inference", new=runtime_error_inference):
+        task = inference_engine.run()
+        await pending_queue.join()  # Wait until the request in pending_queue is processed
+        task.cancel()  # Cancel the background task after processing is done
+
+    assert inference_engine.request_store[request_id].status == RequestStatus.FAILED, f"Request ID {request_id} should be marked as FAILED due to LM engine exception"
+    assert len(inference_engine.request_store[request_id].generated_tokens) == 0, f"Request ID {request_id} should not have generated tokens due to LM engine exception"

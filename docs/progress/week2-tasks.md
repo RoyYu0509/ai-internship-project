@@ -27,6 +27,33 @@ No batching yet, no KV cache optimization yet. One request in, tokens out.
 - **Accepting Criteria:** Inference Engine 启动后, 多个User同时发送requests, InferenceEngine 可以在 async 的情况下, 同时跑 RequestReceiver.fetch() 和 LMEngine.inference(), 并且生成的 token sequence 与预期一致。
 - **Estimated Effort:** 3 hr
 
+- **Detail changes due to redesign:**
+    3.1 RequestData 加 max_token_length: int = 20 field（用 Field(default_factory=...) 不适用这里因为是 int，直接 = 20 即可）
+    3.2 InferenceEngine.__init__ 改动已经做完，check 一下：
+
+    self.lm_engine (已改)
+    签名 (model, pending_queue, request_store) (已对)
+    删掉 waiting_queue (已删)
+
+    3.3 keep_get_request_and_inference：
+
+    去掉 do_sample 参数和 max_token_length 参数
+    从 self.request_store[request_id].max_token_length 读取
+    只传 max_token_length 给 lm_engine.inference
+
+    3.4 run() 改成返回 asyncio.Task：
+    pythonasync def run(self) -> asyncio.Task:
+        if not self.open:
+            raise Exception(...)
+        return asyncio.create_task(self.keep_get_request_and_inference())
+    3.5 request_receiver.py：如果 user submit 时要指定 max_token_length，需要在 submit_request 加参数，默认传 20。先 check 你现在 submit_request 的签名是什么，再决定要不要改。
+    3.6 已经存在的 inference_engine_test.py：check 有没有旧 test 因为 signature 变化而 break（比如如果旧 test 用 waiting_queue 参数初始化）
+    3.7 新增 Task 3 的 test：
+
+    Test: 一个 request 进 queue，engine 跑完，request_store[id].generated_tokens 不为空，status == DONE
+    Test: status transition 正确（WAITING → PROCESSING → DONE）
+    Test: 多个 request sequential 处理正确
+
 
 ### Task 4: End-to-end test for Inference Engine
 - **What:** 写一个 end-to-end 的测试, 多个 request 按顺序进入 inference engine, 能让 LM Engine 生成这些 request 的 token sequence.

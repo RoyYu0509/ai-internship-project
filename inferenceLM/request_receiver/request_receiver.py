@@ -26,14 +26,16 @@ class RequestReceiver:
         self.request_store = request_store
         self.tokenizer = Tokenizer(tokenizer_name)
 
-    async def submit_request(self, prompt_text: str, user_id: str) -> str:
+    async def submit_request(self, prompt_text: str, user_id: str, max_length: int = 20, do_sample: bool = False) -> str:
         """
         Create a new RequestData & Submit a new request to the waiting queue. (可以 wait for queue has space)
 
         Args:
             prompt_text (str): The raw text prompt from the user.
             user_id (str): The ID of the user who sent the request.
-        
+            max_length (int): The maximum length of the generated text.
+            do_sample (bool): Whether to use sampling for generation.
+
         Returns:
             str: The unique request ID assigned to the submitted request.
         """
@@ -43,7 +45,9 @@ class RequestReceiver:
             user_id=user_id, 
             request_id=str(RequestReceiver.index), 
             timestamp=time(), 
-            status=RequestStatus.PENDING
+            status=RequestStatus.PENDING,
+            max_token_length=max_length,
+            do_sample=do_sample
         )
         self.request_store[request_data.request_id] = request_data # 存 request_id : request_data
         RequestReceiver.index += 1

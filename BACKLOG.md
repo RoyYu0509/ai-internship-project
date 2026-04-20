@@ -18,11 +18,18 @@ Item types: `[FEAT]` feature · `[BUG]` bug · `[TECH]` tech debt · `[SPIKE]` i
 ## 🔴 P0 — In Progress / This Week
   
 ### [CHORE] Engine lifecycle management
-- **Why**: 目前 `keep_fetching_requests` 这个 task 在测试结束时不会 graceful shutdown，依赖 pytest event loop cleanup 做兜底。需要 engine 提供明确的 shutdown 机制（cancel pending tasks + drain queue）来确保资源正确释放，避免潜在的 memory leak 或 dangling tasks。
+- **Why**: 目前 `keep_fetching_requests` 这个 task 在测试结束时不会 graceful shutdown，依赖 pytest event loop cleanup 做兜底。需要 engine 提供明确的 shutdown 机制（cancel pending tasks + drain queue）来确保资源正确释放，避免潜在的 memory leak 或 dangling tasks。比如: (init / start / shutdown 三个 state 的 state machine).
 - **Acceptance criteria**: Engine 提供 `shutdown()` 方法，能够取消所有 pending tasks 并清空 queue。测试结束时调用 `shutdown()`，确保没有未完成的 tasks 或未处理的 requests。
 - **Estimate**: M
 - **Owner**: @yifan
 - **Trigger**: Week 3 做 continuous batching 时，scheduler 和 fetcher 的 lifecycle 需要统一管理，这时需要这个 shutdown 机制来确保不同组件能够正确协同工作
+
+### [BUG] Inference 中要用 try / finally 
+- **Why**: 在 inference loop 里，fetch request 之后的 processing 可能会抛异常（比如 GPU out of memory）。如果没有 try/finally 来保证 `pending_queue.task_done()` 一定被调用，那么这个 request 就会一直卡在 pending queue 里，导致后续的 requests 无法被处理，整个 engine 卡死。
+- **Acceptance criteria**: 尝试不同的 Exception 方法, 保证 inference loop 里无论成功还是失败, 都能正确调用 `pending_queue.task_done()`, 确保 pending queue 最后会 empty. 
+- **Estimate**: S
+- **Owner**: @yifan
+- **Trigger**: Week 3 做 continuous batching 时，单个 batch 里任何一个 request 的异常都不应该影响整个 batch 的处理，所以需要这个 try/finally 来保证异常被正确捕获和处理。
 
 ---
 
